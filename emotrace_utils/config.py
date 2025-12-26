@@ -35,9 +35,9 @@ MICRO_EXPRESSION_CONFIG = {
 SCORING_CONFIG = {
     "negative_aus": [1, 2, 4, 5, 7, 15, 17, 23, 24, 25, 26],
     "positive_aus": [6, 12],
-    "au_weight": 0.4,
-    "emotion_weight": 0.35,
-    "micro_expression_weight": 0.25,
+    "au_weight": 0.25,
+    "emotion_weight": 0.60,
+    "micro_expression_weight": 0.15,
 }
 
 RISK_BANDS = {

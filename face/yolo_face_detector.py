@@ -1,6 +1,5 @@
 import cv2
 import numpy as np
-import torch
 from pathlib import Path
 from typing import List, Tuple, Optional
 from emotrace_utils.config import FACE_DETECTION_CONFIG, FRAMES_CROPPED_DIR
@@ -10,29 +9,64 @@ logger = get_logger(__name__)
 
 
 class YOLOFaceDetector:
-    """Face detector using YOLOv5 (CPU optimized)."""
+    """Face detector using OpenCV Haar Cascade."""
     
     def __init__(self, model_name: str = FACE_DETECTION_CONFIG["model_name"]):
-        logger.info(f"Initializing YOLOv5 face detector with model: {model_name}")
+        logger.info(f"Initializing OpenCV face detector")
         
-        self.device = torch.device('cpu')
-        self.model = None
         self.conf_threshold = FACE_DETECTION_CONFIG["conf_threshold"]
         self.face_size = FACE_DETECTION_CONFIG["face_size"]
         
         try:
-            logger.info(f"Loading YOLOv5 model: {model_name}")
-            self.model = torch.hub.load('ultralytics/yolov5', model_name, force_reload=False)
-            self.model.to(self.device)
-            self.model.eval()
-            logger.info(f"YOLOv5 model loaded successfully")
+            # Try multiple methods to find Haar Cascade classifier
+            cascade_filename = 'haarcascade_frontalface_default.xml'
+            cascade_path = None
+            
+            # Method 1: Try OpenCV installation directory
+            cv2_path = Path(cv2.__file__).parent
+            candidate_path = cv2_path / 'data' / 'haarcascades' / cascade_filename
+            if candidate_path.exists():
+                cascade_path = str(candidate_path)
+                logger.debug(f"Found cascade at: {cascade_path}")
+            
+            # Method 2: Try cv2.data.haarcascades if available
+            if cascade_path is None:
+                try:
+                    if hasattr(cv2, 'data') and hasattr(cv2.data, 'haarcascades'):
+                        cascade_path = cv2.data.haarcascades + cascade_filename
+                        if not Path(cascade_path).exists():
+                            cascade_path = None
+                except:
+                    pass
+            
+            # Method 3: Try common system paths
+            if cascade_path is None:
+                possible_paths = [
+                    cv2_path / 'share' / 'opencv4' / 'haarcascades' / cascade_filename,
+                    cv2_path / 'share' / 'opencv' / 'haarcascades' / cascade_filename,
+                ]
+                for path in possible_paths:
+                    if path.exists():
+                        cascade_path = str(path)
+                        logger.debug(f"Found cascade at: {cascade_path}")
+                        break
+            
+            if cascade_path is None:
+                raise Exception(f"Could not locate {cascade_filename} in OpenCV installation. Please run 'python download_cascade.py' to download cascade files.")
+            
+            self.face_cascade = cv2.CascadeClassifier(cascade_path)
+            
+            if self.face_cascade.empty():
+                raise Exception(f"Failed to load Haar Cascade classifier from {cascade_path}")
+            
+            logger.info(f"OpenCV Haar Cascade face detector loaded from {cascade_path}")
         except Exception as e:
-            logger.error(f"Failed to load YOLOv5 model: {str(e)}")
-            raise Exception(f"YOLOv5 model initialization failed: {str(e)}")
+            logger.error(f"Failed to initialize face detector: {str(e)}")
+            raise Exception(f"Face detector initialization failed: {str(e)}")
     
     def detect_faces(self, frame: np.ndarray) -> List[Tuple[int, int, int, int, float]]:
         """
-        Detect faces in frame using YOLOv5.
+        Detect faces in frame using OpenCV Haar Cascade.
         
         Returns:
             List of (x, y, w, h, confidence) tuples
@@ -40,25 +74,20 @@ class YOLOFaceDetector:
         if frame is None or frame.size == 0:
             return []
         
-        if self.model is None:
-            return []
-        
         try:
-            with torch.no_grad():
-                results = self.model(frame)
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            faces = self.face_cascade.detectMultiScale(
+                gray,
+                scaleFactor=1.1,
+                minNeighbors=5,
+                minSize=(30, 30),
+                maxSize=(500, 500)
+            )
             
             detections = []
-            preds = results.pred[0]
-            
-            if preds.shape[0] == 0:
-                return []
-            
-            for *box, conf, cls in preds:
-                if conf >= self.conf_threshold:
-                    x1, y1, x2, y2 = [int(v) for v in box]
-                    w = x2 - x1
-                    h = y2 - y1
-                    detections.append((x1, y1, w, h, float(conf)))
+            for (x, y, w, h) in faces:
+                confidence = 0.9  # Haar Cascade doesn't provide confidence, use default
+                detections.append((x, y, w, h, confidence))
             
             return detections
         
